@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minesweeper — offline</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    font-family: ui-monospace, monospace;
+    background: #101418; color: #d7dde3;
+    display: flex; gap: 28px; padding: 24px; margin: 0;
+    align-items: flex-start;
+  }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  .panel { display: flex; flex-direction: column; gap: 12px; }
+  .cell {
+    width: 26px; height: 26px; border: 1px solid #2c343c;
+    background: #1b2129; color: #d7dde3; font: inherit; font-size: 13px;
+    cursor: pointer; padding: 0;
+  }
+  .cell.empty { background: #12171c; }
+  .cell.mine { background: #5c1a1a; }
+  .cell.flag { color: #ffd166; }
+  .n1 { color: #7fb2ff; } .n2 { color: #7fdc9c; } .n3 { color: #ff9e7f; }
+  .n4 { color: #c79bff; } .n5, .n6, .n7, .n8 { color: #ff6b6b; }
+  #board { display: grid; gap: 1px; }
+  button.active { outline: 2px solid #ffd166; }
+  select, input, button {
+    font: inherit; background: #1b2129; color: #d7dde3;
+    border: 1px solid #2c343c; padding: 6px 10px;
+  }
+  ul { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+  #status { min-height: 20px; }
+</style>
+</head>
+<body>
+  <div class="panel">
+    <h1>minesweeper <small>(offline)</small></h1>
+    <div>
+      <select id="difficulty"></select>
+      <button id="new-game">new game</button>
+      <input id="seed" placeholder="seed (optional)" size="12">
+      <button id="flag-mode">⚑ flag mode</button>
+      <button id="clear-records">clear records</button>
+    </div>
+    <div id="status"></div>
+    <div id="board"></div>
+  </div>
+  <div class="panel">
+    <h2>best times</h2>
+    <ul id="records"></ul>
+    <p>left click: reveal · right click / flag mode: flag<br>
+       first click is always safe (clicked cell and neighbors are mine-free)</p>
+  </div>
+<script type="module">
+/* DOM layer: renders the board, wires clicks (left = reveal, right = flag),
+ * flag-mode toggle, difficulty switch, timer and localStorage records.
+ * Built into the single-file dist/index.html by build.ts. */
+
+// core.ts (inlined below)
+/* Pure game logic: board state, first-click-safe mine placement,
+ * flood-fill reveal, flag mode and win/lose detection. No DOM here —
+ * everything is testable in Node. */
+
+                       
+                
+                    
+                   
+                                                                       
+ 
+
+                             
+               
+                
+                 
+                
+ 
+
+export const DIFFICULTIES               = [
+  { name: "beginner", width: 9, height: 9, mines: 10 },
+  { name: "intermediate", width: 16, height: 16, mines: 40 },
+  { name: "expert", width: 30, height: 16, mines: 99 },
+];
+
+                                                         
+
+                        
+                
+                 
+                
+                                                    
+               
+                
+                        
+                                                                  
+                    
+                                                                   
+                       
+ 
+
+export function createBoard(diff            )        {
+  return {
+    width: diff.width,
+    height: diff.height,
+    mines: diff.mines,
+    cells: diff.width * diff.height > 0
+      ? Array.from({ length: diff.width * diff.height }, () => ({
+          mine: false,
+          revealed: false,
+          flagged: false,
+          adjacent: 0,
+        }))
+      : [],
+    phase: "ready",
+    flags: 0,
+    revealedCount: 0,
+    startedAt: 0,
+    finalSeconds: -1,
+  };
+}
+
+export function index(board       , x        , y        )         {
+  return y * board.width + x;
+}
+
+export function neighbors(board       , x        , y        )           {
+  const out           = [];
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx >= 0 && ny >= 0 && nx < board.width && ny < board.height) {
+        out.push(index(board, nx, ny));
+      }
+    }
+  }
+  return out;
+}
+
+/** Deterministic PRNG so tests (and replay-by-seed) are stable. */
+export function makeRng(seed        )               {
+  let state = seed >>> 0 || 1;
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    state >>>= 0;
+    return state / 4294967296;
+  };
+}
+
+/**
+ * Place mines AFTER the first reveal: the clicked cell and all of its
+ * neighbors are guaranteed mine-free, so every game opens with progress.
+ */
+function placeMines(board       , safeIndex        , rng              )       {
+  const forbidden = new Set        ([safeIndex, ...neighborsOf(board, safeIndex)]);
+  const candidates           = [];
+  for (let i = 0; i < board.cells.length; i++) {
+    if (!forbidden.has(i)) candidates.push(i);
+  }
+  // Fisher-Yates shuffle the tail, take the first `mines`
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = candidates[i];
+    candidates[i] = candidates[j];
+    candidates[j] = tmp;
+  }
+  for (let i = 0; i < board.mines && i < candidates.length; i++) {
+    board.cells[candidates[i]          ].mine = true;
+  }
+  for (let i = 0; i < board.cells.length; i++) {
+    const { x, y } = xy(board, i);
+    board.cells[i].adjacent = neighborsOf(board, index(board, x, y)).filter(
+      (n) => board.cells[n]?.mine,
+    ).length;
+  }
+}
+
+function neighborsOf(board       , i        )           {
+  return neighbors(board, i % board.width, Math.floor(i / board.width));
+}
+
+function xy(board       , i        )                           {
+  return { x: i % board.width, y: Math.floor(i / board.width) };
+}
+
+                                                                             
+
+/** Reveal a cell. First reveal places mines (first-click safety). */
+export function reveal(
+  board       ,
+  x        ,
+  y        ,
+  rng               = makeRng(1),
+)               {
+  if (board.phase === "won" || board.phase === "lost") return "ignored";
+  const i = index(board, x, y);
+  const cell = board.cells[i];
+  if (!cell || cell.flagged || cell.revealed) return "ignored";
+
+  if (board.phase === "ready") {
+    placeMines(board, i, rng);
+    board.phase = "playing";
+    board.startedAt = Date.now();
+  }
+
+  if (cell.mine) {
+    cell.revealed = true;
+    board.phase = "lost";
+    board.finalSeconds = elapsedSeconds(board);
+    return "lost";
+  }
+
+  // flood fill: reveal this cell and every connected zero-adjacent region
+  const stack = [i];
+  while (stack.length > 0) {
+    const current = stack.pop()          ;
+    const c = board.cells[current]        ;
+    if (c.revealed || c.flagged || c.mine) continue;
+    c.revealed = true;
+    board.revealedCount++;
+    if (c.adjacent === 0) {
+      for (const n of neighborsOf(board, current)) {
+        const nc = board.cells[n]        ;
+        if (!nc.revealed && !nc.flagged && !nc.mine) stack.push(n);
+      }
+    }
+  }
+
+  const safeTotal = board.cells.length - board.mines;
+  if (board.revealedCount === safeTotal) {
+    board.phase = "won";
+    board.finalSeconds = elapsedSeconds(board);
+    return "won";
+  }
+  return "flood";
+}
+
+/** Flag mode toggle; flags only exist before the game ends. */
+export function toggleFlag(board       , x        , y        )          {
+  if (board.phase === "won" || board.phase === "lost") return false;
+  const cell = board.cells[index(board, x, y)];
+  if (!cell || cell.revealed) return false;
+  cell.flagged = !cell.flagged;
+  board.flags += cell.flagged ? 1 : -1;
+  return true;
+}
+
+export function elapsedSeconds(board       )         {
+  if (board.phase === "ready") return 0;
+  if (board.finalSeconds >= 0) return board.finalSeconds;
+  return Math.floor((Date.now() - board.startedAt) / 1000);
+}
+
+/** Records are per difficulty: name -> best seconds. Pure helper. */
+export function isRecord(records                        , diff        , seconds        )          {
+  const best = records[diff];
+  return seconds >= 0 && (best === undefined || seconds < best);
+}
+
+/** Reveal all mines after a loss so the player sees the full board. */
+export function exposeMines(board       )       {
+  for (const cell of board.cells) {
+    if (cell.mine) cell.revealed = true;
+  }
+}
+
+
+const STORAGE_KEY = "minesweeper-records";
+
+function loadRecords()                         {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw)                          ) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveRecord(diffName        , seconds        )       {
+  const records = loadRecords();
+  if (isRecord(records, diffName, seconds)) {
+    records[diffName] = seconds;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+  }
+  renderRecords(diffName);
+}
+
+function renderRecords(active        )       {
+  const records = loadRecords();
+  const list = document.getElementById("records")               ;
+  list.innerHTML = "";
+  for (const diff of DIFFICULTIES) {
+    const li = document.createElement("li");
+    const best = records[diff.name];
+    li.textContent =
+      `${diff.name}: ${best === undefined ? "—" : best + "s"}${diff.name === active ? " ◀" : ""}`;
+    list.appendChild(li);
+  }
+}
+
+let current       ;
+let currentDiff             = DIFFICULTIES[0]              ;
+let flagMode = false;
+let seedInput                = null;
+
+function buildBoard()       {
+  current = createBoard(currentDiff);
+  const boardEl = document.getElementById("board")               ;
+  boardEl.style.gridTemplateColumns = `repeat(${currentDiff.width}, 26px)`;
+  boardEl.innerHTML = "";
+  for (let y = 0; y < currentDiff.height; y++) {
+    for (let x = 0; x < currentDiff.width; x++) {
+      const cellEl = document.createElement("button");
+      cellEl.className = "cell";
+      cellEl.dataset.x = String(x);
+      cellEl.dataset.y = String(y);
+      cellEl.addEventListener("click", () => onCell(x, y, false));
+      cellEl.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        onCell(x, y, true);
+      });
+      boardEl.appendChild(cellEl);
+    }
+  }
+  updateStatus();
+  renderRecords(currentDiff.name);
+}
+
+function onCell(x        , y        , rightClick         )       {
+  if (flagMode || rightClick) {
+    toggleFlag(current, x, y);
+  } else {
+    const rng = makeRng(seedInput ?? (Date.now() & 0x7fffffff));
+    const result = reveal(current, x, y, rng);
+    if (result === "lost") exposeMines(current);
+    if (result === "won") {
+      const seconds = current.finalSeconds;
+      if (isRecord(loadRecords(), currentDiff.name, seconds)) {
+        saveRecord(currentDiff.name, seconds);
+      }
+    }
+  }
+  paint();
+}
+
+function paint()       {
+  const cells = document.querySelectorAll                   ("#board .cell");
+  cells.forEach((cellEl) => {
+    const x = Number(cellEl.dataset.x);
+    const y = Number(cellEl.dataset.y);
+    const cell = current.cells[y * current.width + x] ;
+    let text = "";
+    if (cell.revealed) {
+      if (cell.mine) {
+        text = "✸";
+        cellEl.classList.add("mine");
+      } else if (cell.adjacent > 0) {
+        text = String(cell.adjacent);
+        cellEl.classList.add(`n${cell.adjacent}`);
+      } else {
+        cellEl.classList.add("empty");
+      }
+    } else if (cell.flagged) {
+      text = "⚑";
+      cellEl.classList.add("flag");
+    }
+    cellEl.textContent = text;
+  });
+  updateStatus();
+}
+
+function updateStatus()       {
+  const status = document.getElementById("status")               ;
+  const minesLeft = current.mines - current.flags;
+  const seconds = current.phase === "ready" ? 0 : elapsedOf(current);
+  status.textContent =
+    `mines: ${minesLeft}   time: ${seconds}s   phase: ${current.phase}` +
+    (flagMode ? "   [FLAG MODE]" : "");
+}
+
+function elapsedOf(board       )         {
+  if (board.phase === "ready") return 0;
+  if (board.finalSeconds >= 0) return board.finalSeconds;
+  return Math.floor((Date.now() - board.startedAt) / 1000);
+}
+
+function setup()       {
+  const diffSelect = document.getElementById("difficulty")                     ;
+  for (const diff of DIFFICULTIES) {
+    const option = document.createElement("option");
+    option.value = diff.name;
+    option.textContent = `${diff.name} (${diff.width}×${diff.height}, ${diff.mines} mines)`;
+    diffSelect.appendChild(option);
+  }
+  diffSelect.addEventListener("change", () => {
+    currentDiff = DIFFICULTIES.find((d) => d.name === diffSelect.value)              ;
+    buildBoard();
+  });
+
+  const flagToggle = document.getElementById("flag-mode")                     ;
+  flagToggle.addEventListener("click", () => {
+    flagMode = !flagMode;
+    flagToggle.classList.toggle("active", flagMode);
+    updateStatus();
+  });
+
+  const seedField = document.getElementById("seed")                    ;
+  document.getElementById("new-game")?.addEventListener("click", () => {
+    seedInput = seedField.value.trim() === "" ? null : Number(seedField.value);
+    buildBoard();
+  });
+
+  document.getElementById("clear-records")?.addEventListener("click", () => {
+    localStorage.removeItem(STORAGE_KEY);
+    renderRecords(currentDiff.name);
+  });
+
+  buildBoard();
+}
+
+if (typeof document !== "undefined" && document.getElementById("board")) {
+  setup();
+}
+
+window.__qa = { get board() { return current; }, click: (x, y, right) => onCell(x, y, right) };
+</script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minesweeper — offline</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    font-family: ui-monospace, monospace;
+    background: #101418; color: #d7dde3;
+    display: flex; gap: 28px; padding: 24px; margin: 0;
+    align-items: flex-start;
+  }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  .panel { display: flex; flex-direction: column; gap: 12px; }
+  .cell {
+    width: 26px; height: 26px; border: 1px solid #2c343c;
+    background: #1b2129; color: #d7dde3; font: inherit; font-size: 13px;
+    cursor: pointer; padding: 0;
+  }
+  .cell.empty { background: #12171c; }
+  .cell.mine { background: #5c1a1a; }
+  .cell.flag { color: #ffd166; }
+  .n1 { color: #7fb2ff; } .n2 { color: #7fdc9c; } .n3 { color: #ff9e7f; }
+  .n4 { color: #c79bff; } .n5, .n6, .n7, .n8 { color: #ff6b6b; }
+  #board { display: grid; gap: 1px; }
+  button.active { outline: 2px solid #ffd166; }
+  select, input, button {
+    font: inherit; background: #1b2129; color: #d7dde3;
+    border: 1px solid #2c343c; padding: 6px 10px;
+  }
+  ul { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+  #status { min-height: 20px; }
+</style>
+</head>
+<body>
+  <div class="panel">
+    <h1>minesweeper <small>(offline)</small></h1>
+    <div>
+      <select id="difficulty"></select>
+      <button id="new-game">new game</button>
+      <input id="seed" placeholder="seed (optional)" size="12">
+      <button id="flag-mode">⚑ flag mode</button>
+      <button id="clear-records">clear records</button>
+    </div>
+    <div id="status"></div>
+    <div id="board"></div>
+  </div>
+  <div class="panel">
+    <h2>best times</h2>
+    <ul id="records"></ul>
+    <p>left click: reveal · right click / flag mode: flag<br>
+       first click is always safe (clicked cell and neighbors are mine-free)</p>
+  </div>
+<script type="module">
+/*__GAME__*/
+window.__qa = { get board() { return current; }, click: (x, y, right) => onCell(x, y, right) };
+</script>
+</body>
+</html>
